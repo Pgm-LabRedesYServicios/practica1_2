@@ -3,7 +3,8 @@
 
 import ipaddress
 import sys
-from socket import create_connection, htons, socket
+from socket import AF_INET, SOCK_STREAM, create_connection, socket
+from time import sleep
 
 import capnp
 import msgs_capnp
@@ -11,6 +12,7 @@ import msgs_capnp
 EXIT_OK = 0
 EXIT_ERR = 1
 
+incoming_port: int = 0
 
 class Peer:
     sock: socket
@@ -37,7 +39,18 @@ class Server:
             print(f"[x] Error while trying to connect to server: {e.strerror}")
             sys.exit(EXIT_ERR)
 
-    def get_peers(self) -> set[socket]:
+    def send_port(self):
+        """
+        Once connected to the server, advertise which port this peer is
+        listening on
+        """
+        global incoming_port
+
+        port_msg = msgs_capnp.PeerListeningPort.new_message()
+        port_msg.port = incoming_port
+        self.sock.send(port_msg.to_bytes())
+
+    def get_peers(self) -> dict[int, Peer]:
         """
         Once connected to the server, get the connected peers and connect to
         them
@@ -76,10 +89,15 @@ class Server:
             print("[x] Connection unexpectedly died")
             exit(EXIT_ERR)
 
-        sockets: set[socket] = set()
+        sockets: dict[int, Peer] = {}
 
         # Deserialize the message and connect to the peers sent by the server
         addrs = msgs_capnp.ServerRpcMsg.from_bytes(self.buff)
+
+        # Craft port message to advertise to peers
+        port_msg = msgs_capnp.PeerListeningPort.new_message()
+        port_msg.port = incoming_port
+        wire_msg = port_msg.to_bytes()
         for addr in addrs.addrs:
             host = ipaddress.IPv4Address(addr.ip).exploded
             port = addr.port
@@ -87,7 +105,8 @@ class Server:
             print(f"[i] Connecting to {host}:{port}")
             try:
                 conn = create_connection((host, port))
-                sockets.add(conn)
+                conn.send(wire_msg)
+                sockets[conn.fileno()] = Peer(conn)
             except OSError as e:
                 print(
                     f"[-] Error: Cannot connect to {host}:{port}, {e.strerror}"
@@ -97,13 +116,28 @@ class Server:
 
 
 def main():
+    global incoming_port
+
     if len(sys.argv) != 3:
         print(f"Usage:\n\t{sys.argv[0]} <host> <port>")
         exit(1)
 
+    # Bind to random socket and listen to incoming messages
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.bind(("", 0))
+    sock.listen(8)
+    sock.setblocking(False)
+    incoming_port = sock.getsockname()[1]
+
+    # Connect to server
     server = Server(sys.argv[1], sys.argv[2])
+    # Advertise port
+    server.send_port()
+    # Get peers
     peers = server.get_peers()
-    print(peers)
+
+    while True:
+        sleep(1)
 
 
 if __name__ == "__main__":

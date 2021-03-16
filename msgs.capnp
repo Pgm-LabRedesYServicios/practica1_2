@@ -8,3 +8,7 @@ struct PeerAddr {
 struct ServerRpcMsg {
   addrs @0 :List(PeerAddr);
 }
+
+struct PeerListeningPort {
+  port @0 :UInt16;
+}

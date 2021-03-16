@@ -68,7 +68,9 @@ def handle_new_peer(
 ):
     print(f"[i] + {host}:{port} Connected")
     send_peers(conn, peers)
-    peer = Peer(conn, host, port)
+    port_msg = conn.recv(4096)
+    peer_listening_port = msgs_capnp.PeerListeningPort.from_bytes(port_msg)
+    peer = Peer(conn, host, peer_listening_port.port)
     peers[conn.fileno()] = peer
     select_map[conn.fileno()] = conn
 
