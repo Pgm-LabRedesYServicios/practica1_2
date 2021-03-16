@@ -98,6 +98,7 @@ class Server:
 
 def main():
     if len(sys.argv) != 3:
+        print(f"Usage:\n\t{sys.argv[0]} <host> <port>")
         exit(1)
 
     server = Server(sys.argv[1], sys.argv[2])
