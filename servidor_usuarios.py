@@ -42,15 +42,16 @@ def encode_peer(peer: Peer) -> bytearray:
     return peer_msg
 
 
-def send_peers(conn: socket, peers: list[Peer]):
+def send_peers(conn: socket, peers: dict[int, Peer]):
     """
     Given a new peer connection and a list of peers it sends it in the correct
     format to the peer
     """
+    peers_list = list(peers.values())
     addrs = msgs_capnp.ServerRpcMsg.new_message()
-    addrs_list = addrs.init('addrs', len(peers))
-    for i in range(len(peers)):
-        addrs_list[i] = encode_peer(peers[i])
+    addrs_list = addrs.init('addrs', len(peers_list))
+    for i in range(len(peers_list)):
+        addrs_list[i] = encode_peer(peers_list[i])
 
     encoded_msg = addrs.to_bytes()
 
@@ -58,19 +59,33 @@ def send_peers(conn: socket, peers: list[Peer]):
     conn.send(encoded_msg)
 
 
-def handle_new_peer(conn: socket, host: str, port: int, peers: list[Peer], select_map: dict[int, socket]):
+def handle_new_peer(
+        conn: socket,
+        host: str,
+        port: int,
+        peers: dict[int, Peer],
+        select_map: dict[int, socket]
+):
+    print(f"[i] + {host}:{port} Connected")
     send_peers(conn, peers)
     peer = Peer(conn, host, port)
-    peers.append(peer)
+    peers[conn.fileno()] = peer
     select_map[conn.fileno()] = conn
 
 
-def handle_msg(sock: socket, peers: list[Peer], select_map: dict[int, socket]):
+def handle_msg(
+        sock: socket,
+        peers: dict[int, Peer],
+        select_map: dict[int, socket]
+):
     # TODO: Detect closed connections and dispatch
     data = sock.recv(2048)
     if len(data) == 0:
-        print(f"[i] - {sock} disconnected")
+        peer = peers[sock.fileno()]
+        host = ipaddress.IPv4Address(peer.host).exploded
+        print(f"[i] - {host}:{peer.port} Disconnected")
         del select_map[sock.fileno()]
+        del peers[sock.fileno()]
 
 
 def main():
@@ -78,10 +93,8 @@ def main():
         print(f"Usage:\n\t{sys.argv[0]} <port>")
         sys.exit(EXIT_ERR)
 
-    # This is a dummy to start testing
-    # TODO: Find a way to make it a dict
-    # peers: dict[ipaddress.IPv4Address, int] = dict()
-    peers: list[Peer] = []
+    # The map containing peers and socket identifier
+    peers: dict[int, Peer] = {}
 
     # Try to bind and listen to the given port
     sock = socket(AF_INET)
@@ -107,7 +120,6 @@ def main():
         for s in selected:
             if s == sock.fileno():
                 conn, (host, port) = sock.accept()
-                print(f"[i] + New connection from {host}:{port}")
                 handle_new_peer(conn, host, port, peers, select_map)
             else:
                 f = select_map[s]
