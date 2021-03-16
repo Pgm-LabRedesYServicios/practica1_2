@@ -24,14 +24,18 @@ class Peer:
 
 def main():
     if len(sys.argv) != 2:
+        print(f"Usage:\n\t{sys.argv[0]} <port>")
         sys.exit(EXIT_ERR)
 
     peers: dict[ipaddress.IPv4Address, int] = dict()
 
     sock = socket(AF_INET)
     try:
+        print(f"[i] Binding to {sys.argv[1]}")
         sock.bind(('0.0.0.0', int(sys.argv[1])))
+        print(f"[i] Listening on {sys.argv[1]}")
         sock.listen(5)
+        print("[i] Waiting for connections")
         conn, addr = sock.accept()
     except ValueError:
         print(f"The value {sys.argv[1]} is not a valid port number")
