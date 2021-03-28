@@ -17,6 +17,9 @@ counter: int = 0
 
 
 class PeerId():
+    """
+    A socket ID object that is hashable
+    """
     inner: bytearray
 
     def __init__(self, host: bytes, port: bytes):
@@ -33,6 +36,9 @@ class PeerId():
 
 
 class Peer:
+    """
+    A peer object with its corresponding socket connection
+    """
     in_sock: socket
     out_sock: socket
     peer_id: PeerId
@@ -64,6 +70,9 @@ class Peer:
 
 
 class Server:
+    """
+    A server object connection
+    """
     sock: socket
     buff: bytearray
 
@@ -160,7 +169,6 @@ class Server:
 
 def handle_conn(
         sock: socket,
-        addr_map: dict[PeerId, Peer],
         select_map: dict[int, socket]
 ):
     """
@@ -171,20 +179,28 @@ def handle_conn(
     global counter
 
     msg = sock.recv(4096)
-    host, in_port = sock.getpeername()
-    host_bytes = ipaddress.IPv4Address(host).packed
+
     if msg == "":
         print("[x] Error while reading from new connection")
-    out_port = msgs_capnp.PeerListeningPort.from_bytes(msg).port
-
-    out_id = PeerId(host_bytes, out_port.to_bytes(
-        2, byteorder='big', signed=False
-    ))
-    in_id = PeerId(host_bytes, in_port.to_bytes(
-        2, byteorder='big', signed=False
-    ))
 
     select_map[sock.fileno()] = sock
+
+
+def handle_msg(
+        sock: socket,
+        select_map: dict[int, socket]
+):
+    """
+    Handles peer messages, either unregistering peers or printing its content
+    """
+    msg = sock.recv(4096)
+
+    if len(msg) == 0:
+        host, port = sock.getpeername()
+        del select_map[sock.fileno()]
+        print(f"[i] - {host}:{port} Disconnected")
+    else:
+        print(msg)
 
 
 def main():
@@ -208,11 +224,6 @@ def main():
     # Get peers
     out_peers = server.get_peers()
 
-    # A hashmap from out addr to peer
-    addr_map = {}
-    for peer in out_peers.values():
-        addr_map[peer.peer_id] = peer
-
     # A hashmap from socketid to socket
     select_map = {}
     select_map[sock.fileno()] = sock
@@ -224,11 +235,10 @@ def main():
             if s == sock.fileno():
                 conn, (host, port) = sock.accept()
                 print(f"[i] + {host}:{port} Connected")
-                handle_conn(conn, addr_map, select_map)
+                handle_conn(conn, select_map)
             else:
-                pass
-                # f = select_map[s]
-                # handle_msg(f, peers, select_map)
+                f = select_map[s]
+                handle_msg(f, select_map)
 
 
 if __name__ == "__main__":
