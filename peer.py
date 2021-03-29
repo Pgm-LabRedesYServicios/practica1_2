@@ -216,6 +216,12 @@ def handle_stdin(
     msg = s.readline()
     trimmed = msg.strip()
     command, args = input_parse(trimmed)
+    if command == "text":
+        for p in select_map:
+            fd, sock = p
+            if fd == 0:
+                pass
+            sock.send(args)
 
 
 def input_parse(text: str) -> tuple[str, str]:
