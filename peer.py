@@ -202,12 +202,13 @@ def handle_msg(
         del select_map[sock.fileno()]
         print(f"[i] - {host}:{port} Disconnected")
     else:
-        print(msg)
+        print(msg.decode())
 
 
 def handle_stdin(
         s: io.TextIOWrapper,
-        select_map: dict[int, socket]
+        select_map: dict[int, socket],
+        listening: int
 ):
     """
     Handles stdin input and dispatches it to its corresponding function
@@ -217,11 +218,11 @@ def handle_stdin(
     trimmed = msg.strip()
     command, args = input_parse(trimmed)
     if command == "text":
+        print(select_map)
         for p in select_map:
-            fd, sock = p
-            if fd == 0:
-                pass
-            sock.send(args)
+            if p != 0 and p != listening:
+                sock = select_map[p]
+                sock.send(args.encode())
 
 
 def input_parse(text: str) -> tuple[str, str]:
@@ -284,7 +285,7 @@ def main():
                 print(f"[i] + {host}:{port} Connected")
                 handle_conn(conn, select_map)
             elif s == stdin.fileno():
-                handle_stdin(stdin, select_map)
+                handle_stdin(stdin, select_map, sock.fileno())
             else:
                 f = select_map[s]
                 handle_msg(f, select_map)
