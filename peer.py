@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 """ff"""
 
+import io
 import ipaddress
 import sys
 from select import select
 from socket import AF_INET, SOCK_STREAM, create_connection, socket
+from sys import stdin
 
 import capnp
 import msgs_capnp
@@ -203,6 +205,42 @@ def handle_msg(
         print(msg)
 
 
+def handle_stdin(
+        s: io.TextIOWrapper,
+        select_map: dict[int, socket]
+):
+    """
+    Handles stdin input and dispatches it to its corresponding function
+    depending on the command
+    """
+    msg = s.readline()
+    trimmed = msg.strip()
+    command, args = input_parse(trimmed)
+
+
+def input_parse(text: str) -> tuple[str, str]:
+    """
+    Parses an input string into a command and a list of the arguments that it
+    takes
+    """
+    ret: tuple[str, str] = ("", "")
+
+    if text[0] == '/':
+        # If the string starts with a / it is a command
+        com, _, rest = text.partition(' ')
+        ret = (com, rest)
+    elif text[0] == '\\' and text[1] == '/':
+        # If the string starts with a \ and it is followed by / it is a message
+        # with an escaped /
+        text.removeprefix('\\')
+        ret = ('text', text)
+    else:
+        # Else it is just a message
+        ret = ('text', text)
+
+    return ret
+
+
 def main():
     global incoming_port
 
@@ -229,6 +267,9 @@ def main():
     select_map[sock.fileno()] = sock
     select_map |= map(lambda k: (k[0], k[1].out_sock), out_peers.items())
 
+    # Register stdin
+    select_map[stdin.fileno()] = stdin
+
     while True:
         selected, x, y = select(select_map, [], [])
         for s in selected:
@@ -236,6 +277,8 @@ def main():
                 conn, (host, port) = sock.accept()
                 print(f"[i] + {host}:{port} Connected")
                 handle_conn(conn, select_map)
+            elif s == stdin.fileno():
+                handle_stdin(stdin, select_map)
             else:
                 f = select_map[s]
                 handle_msg(f, select_map)
