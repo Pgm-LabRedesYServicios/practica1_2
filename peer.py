@@ -217,11 +217,16 @@ def handle_stdin(
     msg = s.readline()
     trimmed = msg.strip()
     command, args = input_parse(trimmed)
+
+    # Text command is a simple message
     if command == "text":
         for p in select_map:
             if p != 0 and p != listening:
                 sock = select_map[p]
                 sock.send(args.encode())
+    # File command is to send files
+    elif command == "file":
+        pass
 
 
 def input_parse(text: str) -> tuple[str, str]:
@@ -234,12 +239,11 @@ def input_parse(text: str) -> tuple[str, str]:
     if text[0] == '/':
         # If the string starts with a / it is a command
         com, _, rest = text.partition(' ')
-        ret = (com, rest)
+        ret = (com.removeprefix('/'), rest)
     elif text[0] == '\\' and text[1] == '/':
         # If the string starts with a \ and it is followed by / it is a message
         # with an escaped /
-        text.removeprefix('\\')
-        ret = ('text', text)
+        ret = ('text', text.removeprefix('\\'))
     else:
         # Else it is just a message
         ret = ('text', text)
