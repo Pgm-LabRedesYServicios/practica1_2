@@ -218,7 +218,6 @@ def handle_stdin(
     trimmed = msg.strip()
     command, args = input_parse(trimmed)
     if command == "text":
-        print(select_map)
         for p in select_map:
             if p != 0 and p != listening:
                 sock = select_map[p]
