@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 """ff"""
 
+import io
 import ipaddress
 import sys
+from select import select
 from socket import AF_INET, SOCK_STREAM, create_connection, socket
-from time import sleep
+from sys import stdin
 
 import capnp
 import msgs_capnp
@@ -13,18 +15,66 @@ EXIT_OK = 0
 EXIT_ERR = 1
 
 incoming_port: int = 0
+counter: int = 0
+
+
+class PeerId():
+    """
+    A socket ID object that is hashable
+    """
+    inner: bytearray
+
+    def __init__(self, host: bytes, port: bytes):
+        self.inner = bytearray()
+        self.inner += host
+        self.inner += port
+
+    def __hash__(self):
+        num = int.from_bytes(self.inner, byteorder='big', signed=False)
+        return num
+
+    def __repr__(self):
+        return f"{self.__hash__()}"
+
 
 class Peer:
-    sock: socket
+    """
+    A peer object with its corresponding socket connection
+    """
+    in_sock: socket
+    out_sock: socket
+    peer_id: PeerId
 
-    def __init__(self, sock: socket):
-        self.sock = sock
+    def __init__(
+            self,
+            peer_id: PeerId,
+            in_sock: socket = None,
+            out_sock: socket = None
+    ):
+        """
+        Create a peer given the peer_id
+        """
+        self.peer_id = peer_id
+
+        if in_sock is not None:
+            self.in_sock = in_sock
+        if out_sock is not None:
+            self.out_sock = out_sock
+
+    def __hash__(self):
+        return self.peer_id.__hash__()
+
+    def __repr__(self):
+        return f"Peer(id: {self.peer_id.__hash__()})"
 
     def send_msg(self):
         pass
 
 
 class Server:
+    """
+    A server object connection
+    """
     sock: socket
     buff: bytearray
 
@@ -102,17 +152,99 @@ class Server:
             host = ipaddress.IPv4Address(addr.ip).exploded
             port = addr.port
 
+            peer_id_host = addr.ip.to_bytes(4, byteorder='big', signed=False)
+            peer_id_port = addr.port.to_bytes(2, byteorder='big', signed=False)
+            peer_id = PeerId(peer_id_host, peer_id_port)
+
             print(f"[i] Connecting to {host}:{port}")
             try:
                 conn = create_connection((host, port))
                 conn.send(wire_msg)
-                sockets[conn.fileno()] = Peer(conn)
+                sockets[conn.fileno()] = Peer(peer_id, out_sock=conn)
             except OSError as e:
                 print(
                     f"[-] Error: Cannot connect to {host}:{port}, {e.strerror}"
                 )
 
         return sockets
+
+
+def handle_conn(
+        sock: socket,
+        select_map: dict[int, socket]
+):
+    """
+    Handles a new connection, registering its socket and creating its
+    corresponding outbound connection if it doesn't exist
+    """
+    global incoming_port
+    global counter
+
+    msg = sock.recv(4096)
+
+    if msg == "":
+        print("[x] Error while reading from new connection")
+
+    select_map[sock.fileno()] = sock
+
+
+def handle_msg(
+        sock: socket,
+        select_map: dict[int, socket]
+):
+    """
+    Handles peer messages, either unregistering peers or printing its content
+    """
+    msg = sock.recv(4096)
+
+    if len(msg) == 0:
+        host, port = sock.getpeername()
+        del select_map[sock.fileno()]
+        print(f"[i] - {host}:{port} Disconnected")
+    else:
+        print(msg)
+
+
+def handle_stdin(
+        s: io.TextIOWrapper,
+        select_map: dict[int, socket]
+):
+    """
+    Handles stdin input and dispatches it to its corresponding function
+    depending on the command
+    """
+    msg = s.readline()
+    trimmed = msg.strip()
+    command, args = input_parse(trimmed)
+    if command == "text":
+        for p in select_map:
+            fd, sock = p
+            if fd == 0:
+                pass
+            sock.send(args)
+
+
+def input_parse(text: str) -> tuple[str, str]:
+    """
+    Parses an input string into a command and a list of the arguments that it
+    takes
+    """
+    ret: tuple[str, str] = ("", "")
+
+    if text[0] == '/':
+        # If the string starts with a / it is a command
+        com, _, rest = text.partition(' ')
+        ret = (com, rest)
+    elif text[0] == '\\' and text[1] == '/':
+        # If the string starts with a \ and it is followed by / it is a message
+        # with an escaped /
+        text.removeprefix('\\')
+        ret = ('text', text)
+    else:
+        # Else it is just a message
+        ret = ('text', text)
+
+    return ret
 
 
 def main():
@@ -134,10 +266,28 @@ def main():
     # Advertise port
     server.send_port()
     # Get peers
-    peers = server.get_peers()
+    out_peers = server.get_peers()
+
+    # A hashmap from socketid to socket
+    select_map = {}
+    select_map[sock.fileno()] = sock
+    select_map |= map(lambda k: (k[0], k[1].out_sock), out_peers.items())
+
+    # Register stdin
+    select_map[stdin.fileno()] = stdin
 
     while True:
-        sleep(1)
+        selected, x, y = select(select_map, [], [])
+        for s in selected:
+            if s == sock.fileno():
+                conn, (host, port) = sock.accept()
+                print(f"[i] + {host}:{port} Connected")
+                handle_conn(conn, select_map)
+            elif s == stdin.fileno():
+                handle_stdin(stdin, select_map)
+            else:
+                f = select_map[s]
+                handle_msg(f, select_map)
 
 
 if __name__ == "__main__":
