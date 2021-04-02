@@ -186,6 +186,7 @@ def handle_conn(
 
     if msg == "":
         print("[x] Error while reading from new connection")
+        return
 
     select_map[sock.fileno()] = sock
 
