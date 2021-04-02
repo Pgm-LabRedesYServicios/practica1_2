@@ -238,6 +238,7 @@ def handle_msg(
                 except OSError as e:
                     print(f"[x] Error while writing to {e.strerror}")
                     return
+                print("[i] File written correctly")
 
 
 def handle_stdin(
@@ -294,6 +295,8 @@ def handle_stdin(
                 sock = select_map[p]
                 sock.send(size.to_bytes(4096, byteorder='big', signed=False))
                 sock.send(bytes_msg)
+
+        print("[i] File sent correctly")
 
 
 def input_parse(text: str) -> tuple[str, str]:
