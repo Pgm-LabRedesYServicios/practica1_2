@@ -17,7 +17,10 @@ struct PeerMsg {
   type @0 :Type;
   content :union {
     text @1 :Text;
-    file @2 :Text;
+    file :group {
+      filename @2 :Text;
+      content @3 :Data;
+    }
   }
 
   enum Type {

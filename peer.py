@@ -1,5 +1,7 @@
 #!/usr/bin/env python
-"""ff"""
+"""
+This module contains the executable for the p2p part of the chat
+"""
 
 import io
 import ipaddress
@@ -195,14 +197,47 @@ def handle_msg(
     """
     Handles peer messages, either unregistering peers or printing its content
     """
-    msg = sock.recv(4096)
+    msg_size = sock.recv(4096)
+
+    length = int.from_bytes(msg_size, byteorder='big', signed=False)
+    received = 0
+
+    msg = bytearray()
+
+    while received < length:
+        new = sock.recv(4096)
+        if len(new) == 0:
+            return
+        else:
+            msg += new
+            received += len(new)
 
     if len(msg) == 0:
         host, port = sock.getpeername()
         del select_map[sock.fileno()]
         print(f"[i] - {host}:{port} Disconnected")
     else:
-        print(msg.decode())
+        struct_msg = msgs_capnp.PeerMsg.from_bytes(msg)
+        if struct_msg.type == "text":
+            print(struct_msg.content.text)
+        elif struct_msg.type == "file":
+            filename = struct_msg.content.file.filename
+            file_content = struct_msg.content.file.content
+
+            print(
+                f"[?] File \"{filename}\" received, do you want to save it? (y/n): ",
+                end=''
+            )
+            answer = input()
+            if answer == "y":
+                print("[?] What name do you want to give it?: ", end='')
+                filepath = input()
+                try:
+                    f = open(filepath, 'wb')
+                    f.write(file_content)
+                except OSError as e:
+                    print(f"[x] Error while writing to {e.strerror}")
+                    return
 
 
 def handle_stdin(
@@ -220,13 +255,45 @@ def handle_stdin(
 
     # Text command is a simple message
     if command == "text":
+        # Create the message to be sent
+        wire_msg = msgs_capnp.PeerMsg.new_message()
+        wire_msg.type = "text"
+        wire_msg.content.text = args
+        bytes_msg = wire_msg.to_bytes()
+        size = len(bytes_msg)
+
+        # Broadcast the message
         for p in select_map:
             if p != 0 and p != listening:
                 sock = select_map[p]
-                sock.send(args.encode())
+                sock.send(size.to_bytes(4096, byteorder='big', signed=False))
+                sock.send(bytes_msg)
+
     # File command is to send files
     elif command == "file":
-        pass
+        try:
+            f = open(args, 'rb')
+        except OSError as e:
+            print(f"[x] Error while opening file \"{e.strerror}\"")
+            return
+
+        file_content = f.read()
+
+        wire_msg = msgs_capnp.PeerMsg.new_message()
+        wire_msg.type = "file"
+        wire_msg.content.init('file')
+        wire_msg.content.file.filename = args
+        wire_msg.content.file.content = file_content
+
+        bytes_msg = wire_msg.to_bytes()
+        size = len(bytes_msg)
+
+        # Broadcast the message
+        for p in select_map:
+            if p != 0 and p != listening:
+                sock = select_map[p]
+                sock.send(size.to_bytes(4096, byteorder='big', signed=False))
+                sock.send(bytes_msg)
 
 
 def input_parse(text: str) -> tuple[str, str]:

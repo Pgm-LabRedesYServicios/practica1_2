@@ -1,5 +1,7 @@
 #!/usr/bin/env python
-"""ff"""
+"""
+This module contains the server to bootstrap the p2p connections
+"""
 
 import ipaddress
 import sys
