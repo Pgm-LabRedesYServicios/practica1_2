@@ -197,48 +197,74 @@ def handle_msg(
     """
     Handles peer messages, either unregistering peers or printing its content
     """
+    # Read the first 4096 bytes that tell us the size of the message
     msg_size = sock.recv(4096)
+    if len(msg_size) == 0:
+        host, port = sock.getpeername()
+        del select_map[sock.fileno()]
+        print(f"[i] - {host}:{port} Disconnected")
+    try:
+        length = int.from_bytes(msg_size, byteorder='big', signed=False)
+    except ValueError as e:
+        print(f"[x] Error {e} while reading msg size")
+        return
 
-    length = int.from_bytes(msg_size, byteorder='big', signed=False)
+    # Initialize received to 0 to keep count of the bytes received
     received = 0
-
+    # Initialize the buffer where we are going to save the message
     msg = bytearray()
 
+    # Set timeout on socket just in case
+    sock.settimeout(0.75)
+
+    # Get the message or abort if nothing is received
     while received < length:
         new = sock.recv(4096)
         if len(new) == 0:
+            host, port = sock.getpeername()
+            del select_map[sock.fileno()]
+            print(f"[i] - {host}:{port} Disconnected")
             return
         else:
             msg += new
             received += len(new)
 
-    if len(msg) == 0:
-        host, port = sock.getpeername()
-        del select_map[sock.fileno()]
-        print(f"[i] - {host}:{port} Disconnected")
-    else:
-        struct_msg = msgs_capnp.PeerMsg.from_bytes(msg)
-        if struct_msg.type == "text":
-            print(struct_msg.content.text)
-        elif struct_msg.type == "file":
-            filename = struct_msg.content.file.filename
-            file_content = struct_msg.content.file.content
+    # Clear the timeout
+    sock.settimeout(0)
 
-            print(
-                f"[?] File \"{filename}\" received, do you want to save it? (y/n): ",
-                end=''
-            )
-            answer = input()
-            if answer == "y":
-                print("[?] What name do you want to give it?: ", end='')
-                filepath = input()
-                try:
-                    f = open(filepath, 'wb')
-                    f.write(file_content)
-                except OSError as e:
-                    print(f"[x] Error while writing to {e.strerror}")
-                    return
-                print("[i] File written correctly")
+    # Deserialize msg
+    struct_msg = msgs_capnp.PeerMsg.from_bytes(msg)
+
+    # Handle text message
+    if struct_msg.type == "text":
+        print(struct_msg.content.text)
+    # Handle file message
+    elif struct_msg.type == "file":
+        # Destruct message fields
+        filename = struct_msg.content.file.filename
+        file_content = struct_msg.content.file.content
+
+        # Ask for permission to store file
+        print(
+            f"[?] File \"{filename}\" received," +
+            " do you want to save it? (y/n): ",
+            end=''
+        )
+        answer = input()
+        if answer == "y":
+            # Ask where to store the file
+            print("[?] What name do you want to give it?: ", end='')
+            filepath = input()
+
+            # Open and store file
+            try:
+                f = open(filepath, 'wb')
+                f.write(file_content)
+            except OSError as e:
+                print(f"[x] Error while writing to {e.strerror}")
+                return
+
+            print("[i] File written correctly")
 
 
 def handle_stdin(
@@ -260,6 +286,8 @@ def handle_stdin(
         wire_msg = msgs_capnp.PeerMsg.new_message()
         wire_msg.type = "text"
         wire_msg.content.text = args
+
+        # Serialize message
         bytes_msg = wire_msg.to_bytes()
         size = len(bytes_msg)
 
@@ -272,20 +300,24 @@ def handle_stdin(
 
     # File command is to send files
     elif command == "file":
+        # Open file path
         try:
             f = open(args, 'rb')
         except OSError as e:
             print(f"[x] Error while opening file \"{e.strerror}\"")
             return
 
+        # Read file content into variable
         file_content = f.read()
 
+        # Craft message to be sent
         wire_msg = msgs_capnp.PeerMsg.new_message()
         wire_msg.type = "file"
         wire_msg.content.init('file')
         wire_msg.content.file.filename = args
         wire_msg.content.file.content = file_content
 
+        # Serialize message
         bytes_msg = wire_msg.to_bytes()
         size = len(bytes_msg)
 
@@ -353,12 +385,15 @@ def main():
     while True:
         selected, x, y = select(select_map, [], [])
         for s in selected:
+            # This means that a new client connected
             if s == sock.fileno():
                 conn, (host, port) = sock.accept()
                 print(f"[i] + {host}:{port} Connected")
                 handle_conn(conn, select_map)
+            # This means that the user input a message
             elif s == stdin.fileno():
                 handle_stdin(stdin, select_map, sock.fileno())
+            # This means that a peer message was received
             else:
                 f = select_map[s]
                 handle_msg(f, select_map)
