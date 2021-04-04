@@ -204,6 +204,7 @@ def handle_msg(
         host, port = sock.getpeername()
         del select_map[sock.fileno()]
         print(f"[i] - {host}:{port} Disconnected")
+        return
     try:
         length = int.from_bytes(msg_size, byteorder='big', signed=False)
     except ValueError as e:
