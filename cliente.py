@@ -26,22 +26,32 @@ def main():
         stdin.fileno(): stdin
     }
 
+    # Select loop, it will loop indefinitely waiting for events
     while True:
         l, m, n = select(fd_map, [], [])
 
         for fd in l:
             if fd == stdin.fileno():
+                # If the descriptor is stdin, then we need to send a msg
                 handle_stdin(conn)
             elif fd == conn.fileno():
+                # If the descriptor is the server, then we received a msg
                 handle_server(conn)
 
 
 def handle_stdin(server_conn: socket):
+    """
+    Empties stdin buffer and sends it through the socket
+    """
     msg = input()
     server_conn.send(msg.encode())
 
 
 def handle_server(server_conn: socket):
+    """
+    Reads the message from the socket and either prints it or exits if the
+    server closed the connection
+    """
     msg = server_conn.recv(4096)
     if len(msg) == 0:
         print("The server disconnected")
